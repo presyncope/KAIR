@@ -28,7 +28,7 @@ from models.select_model import define_Model
 '''
 
 
-def main(json_path='options/vrt/001_train_vrt_videosr_bi_reds_6frames.json'):
+def main(json_path='options/rvrt/001_train_rvrt_videosr_bi_reds_30frames.json'):
 
     '''
     # ----------------------------------------
@@ -151,6 +151,7 @@ def main(json_path='options/vrt/001_train_vrt_videosr_bi_reds_6frames.json'):
     # Step--3 (initialize model)
     # ----------------------------------------
     '''
+    os.environ['TORCH_CUDA_ARCH_LIST'] = "8.9"
 
     model = define_Model(opt)
     model.init_train()

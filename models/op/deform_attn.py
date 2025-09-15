@@ -4,31 +4,28 @@
 # LICENSE file in the root directory of this source tree.
 
 
-import math
 import os
 import torch
 from torch import nn as nn
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
-from torch.nn import functional as F
 from einops.layers.torch import Rearrange
-from distutils.version import LooseVersion
 from torch.utils.cpp_extension import load
+from typing import Type
 
 module_path = os.path.dirname(__file__)
 deform_attn_ext = load(
     'deform_attn',
     sources=[
         os.path.join(module_path, 'deform_attn_ext.cpp'),
-        os.path.join(module_path, 'deform_attn_cuda_pt110.cpp' if LooseVersion(torch.__version__) >= LooseVersion(
-            '1.10.0') else 'deform_attn_cuda_pt109.cpp'),
+        os.path.join(module_path, 'deform_attn_cuda_pt110.cpp'),
         os.path.join(module_path, 'deform_attn_cuda_kernel.cu'),
 ],
 )
 
 
 class Mlp(nn.Module):
-    """ Multilayer perceptron.
+    """Multilayer perceptron.
 
     Args:
         x: (B, D, H, W, C)
@@ -37,7 +34,13 @@ class Mlp(nn.Module):
         x: (B, D, H, W, C)
     """
 
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+    def __init__(
+        self,
+        in_features: int,
+        hidden_features: int | None = None,
+        out_features: int | None = None,
+        act_layer: Type[nn.Module] = nn.GELU,
+    ):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -46,25 +49,27 @@ class Mlp(nn.Module):
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.fc2(self.act(self.fc1(x)))
 
 
 class DeformAttnFunction(Function):
 
     @staticmethod
-    def forward(ctx,
-                q,
-                kv,
-                offset,
-                kernel_h,
-                kernel_w,
-                stride=1,
-                padding=0,
-                dilation=1,
-                attention_heads=1,
-                deformable_groups=1,
-                clip_size=1):
+    def forward(
+        ctx,
+        q: torch.Tensor,
+        kv: torch.Tensor,
+        offset: torch.Tensor,
+        kernel_h: int,
+        kernel_w: int,
+        stride: int = 1,
+        padding: int = 0,
+        dilation: int = 1,
+        attention_heads: int = 1,
+        deformable_groups: int = 1,
+        clip_size: int = 1,
+    ):
         ctx.kernel_h = kernel_h
         ctx.kernel_w = kernel_w
         ctx.stride = stride

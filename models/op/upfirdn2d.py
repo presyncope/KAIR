@@ -12,6 +12,7 @@ upfirdn2d_op = load(
         os.path.join(module_path, 'upfirdn2d.cpp'),
         os.path.join(module_path, 'upfirdn2d_kernel.cu'),
     ],
+    verbose=True,
 )
 
 #upfirdn2d_op = _import_module_from_library('upfirdn2d', '/tmp/torch_extensions/upfirdn2d', True)

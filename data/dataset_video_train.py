@@ -145,7 +145,7 @@ class VideoRecurrentTrainDataset(data.Dataset):
         img_gts = []
         for neighbor in neighbor_list:
             if self.is_lmdb:
-                img_lq_path = f'{clip_name}/{neighbor:{self.filename_tmpl}}'
+                img_lq_path = f'X4/{clip_name}/{neighbor:{self.filename_tmpl}}'
                 img_gt_path = f'{clip_name}/{neighbor:{self.filename_tmpl}}'
             else:
                 img_lq_path = self.lq_root / clip_name / f'{neighbor:{self.filename_tmpl}}.{self.filename_ext}'
@@ -153,11 +153,15 @@ class VideoRecurrentTrainDataset(data.Dataset):
 
             # get LQ
             img_bytes = self.file_client.get(img_lq_path, 'lq')
+            if img_bytes is None:
+                raise ValueError(f'File client get None for lq image: {img_lq_path}')
             img_lq = utils_video.imfrombytes(img_bytes, float32=True)
             img_lqs.append(img_lq)
 
             # get GT
             img_bytes = self.file_client.get(img_gt_path, 'gt')
+            if img_bytes is None:
+                raise ValueError(f'File client get None for gt image: {img_gt_path}')
             img_gt = utils_video.imfrombytes(img_bytes, float32=True)
             img_gts.append(img_gt)
 
@@ -229,6 +233,8 @@ class VideoRecurrentTrainNonblindDenoisingDataset(VideoRecurrentTrainDataset):
 
             # get GT
             img_bytes = self.file_client.get(img_gt_path, 'gt')
+            if img_bytes is None:
+                raise ValueError(f'File client get None for gt image: {img_gt_path}')
             img_gt = utils_video.imfrombytes(img_bytes, float32=True)
             img_gts.append(img_gt)
 
@@ -352,9 +358,13 @@ class VideoRecurrentTrainVimeoDataset(data.Dataset):
                 img_gt_path = self.gt_root / clip / seq / f'im{neighbor}.png'
             # LQ
             img_bytes = self.file_client.get(img_lq_path, 'lq')
+            if img_bytes is None:
+                raise ValueError(f'File client get None for lq image: {img_lq_path}')
             img_lq = utils_video.imfrombytes(img_bytes, float32=True)
             # GT
             img_bytes = self.file_client.get(img_gt_path, 'gt')
+            if img_bytes is None:
+                raise ValueError(f'File client get None for gt image: {img_gt_path}')
             img_gt = utils_video.imfrombytes(img_bytes, float32=True)
 
             img_lqs.append(img_lq)
@@ -418,6 +428,8 @@ class VideoRecurrentTrainVimeoVFIDataset(VideoRecurrentTrainVimeoDataset):
                 img_lq_path = self.lq_root / clip / seq / f'im{neighbor}.png'
             # LQ
             img_bytes = self.file_client.get(img_lq_path, 'lq')
+            if img_bytes is None:
+                raise ValueError(f'File client get None for lq image: {img_lq_path}')
             img_lq = utils_video.imfrombytes(img_bytes, float32=True)
             img_lqs.append(img_lq)
 
@@ -428,6 +440,8 @@ class VideoRecurrentTrainVimeoVFIDataset(VideoRecurrentTrainVimeoDataset):
             img_gt_path = self.gt_root / clip / seq / 'im4.png'
 
         img_bytes = self.file_client.get(img_gt_path, 'gt')
+        if img_bytes is None:
+            raise ValueError(f'File client get None for gt image: {img_gt_path}')
         img_gt = utils_video.imfrombytes(img_bytes, float32=True)
         img_gts.append(img_gt)
 
