@@ -1,8 +1,8 @@
 {
   "task": "001_train_rvrt_videosr_bi_reds_30frames"
   , "model": "vrt"
-  , "gpu_ids": [0]
-  , "dist": false
+  , "gpu_ids": [0,1,2,3,4,5,6,7]
+  , "dist": true
   , "find_unused_parameters": false
   , "use_static_graph": true
 
@@ -57,14 +57,14 @@
     , "window_size": [2, 8, 8]
     , "num_blocks": [1, 2, 1]
     , "depths": [2, 2, 2]
-    , "embed_dims": [64, 64, 64]
+    , "embed_dims": [144, 144, 144]
     , "num_heads": [6, 6, 6]
     , "inputconv_groups": [1, 1, 1, 1, 1, 1]
     , "spynet_path": "model_zoo/rvrt/spynet_sintel_final-3d2a1287.pth" // automatical download
     , "deformable_groups": 12
-    , "attention_heads": 8
+    , "attention_heads": 12
     , "attention_window": [3, 3]
-    , "use_checkpoint_attn": true
+    , "use_checkpoint_attn": false
     , "use_checkpoint_ffn": true
     , "no_checkpoint_attn_blocks": []
     , "no_checkpoint_ffn_blocks": []

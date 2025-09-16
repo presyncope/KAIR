@@ -3,10 +3,11 @@ import torch
 import torch.nn as nn
 from utils.utils_bnorm import merge_bn, tidy_sequential
 from torch.nn.parallel import DataParallel, DistributedDataParallel
+from typing import Any
 
 
 class ModelBase():
-    def __init__(self, opt):
+    def __init__(self, opt: dict):
         self.opt = opt                         # opt
         self.save_dir = opt['path']['models']  # save models
         self.device = torch.device('cuda' if opt['gpu_ids'] is not None else 'cpu')
@@ -77,16 +78,16 @@ class ModelBase():
     def print_network(self):
         pass
 
-    def info_network(self):
+    def info_network(self) -> Any | None:
         pass
 
     def print_params(self):
         pass
 
-    def info_params(self):
+    def info_params(self) -> Any | None:
         pass
 
-    def get_bare_model(self, network):
+    def get_bare_model(self, network: nn.Module | DataParallel | DistributedDataParallel) -> nn.Module:
         """Get bare model, especially under wrapping with
         DistributedDataParallel or DataParallel.
         """
@@ -94,7 +95,7 @@ class ModelBase():
             network = network.module
         return network
 
-    def model_to_device(self, network):
+    def model_to_device(self, network: nn.Module) -> nn.Module:
         """Model to device. It also warps models with DistributedDataParallel
         or DataParallel.
         Args:
@@ -108,8 +109,6 @@ class ModelBase():
             if use_static_graph:
                 print('Using static graph. Make sure that "unused parameters" will not change during training loop.')
                 network._set_static_graph()
-        else:
-            network = DataParallel(network)
         return network
 
     # ----------------------------------------
@@ -118,7 +117,7 @@ class ModelBase():
     def describe_network(self, network):
         network = self.get_bare_model(network)
         msg = '\n'
-        msg += 'Networks name: {}'.format(network.__class__.__name__) + '\n'
+        msg += f'Networks name: {network.__class__.__name__}' + '\n'
         msg += 'Params number: {}'.format(sum(map(lambda x: x.numel(), network.parameters()))) + '\n'
         msg += 'Net structure:\n{}'.format(str(network)) + '\n'
         return msg

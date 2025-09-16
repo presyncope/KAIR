@@ -1,0 +1,105 @@
+{
+  "task": "001_train_rebotnet_videosr_reds",
+  
+  "scale": 4,
+  "n_channels": 3,
+
+  "find_unused_parameters": false,
+  "dist": false,
+
+  "model": "rebotnet",
+  "gpu_ids": [0],
+  
+  
+  "path": {
+    "root": "experiments",
+    "pretrained_netG": null,
+    "pretrained_netE": null
+  },
+
+  "datasets": {
+    "train": {
+      "name": "train_dataset",
+      "dataset_type": "RebotTrainDatasetREDS",
+      "dataroot_gt": "trainsets/REDS/train_sharp_with_val.lmdb",
+      "dataroot_lq": "trainsets/REDS/train_sharp_bicubic_with_val.lmdb",
+      "meta_info_file": "data/meta_info/meta_info_REDS_GT.txt",
+      "filename_tmpl": "08d",
+      "filename_ext": "png",
+      "val_partition": "REDS4",
+      "test_mode": false,
+      "io_backend": {
+        "type": "lmdb"
+      },
+      "num_frame": 20,
+      "gt_size": [768, 1280],
+      "interval_list": [1],
+      "random_reverse": false,
+      "use_hflip": true,
+      "use_rot": true,
+      "dataloader_shuffle": true,
+      "dataloader_num_workers": 32,
+      "dataloader_batch_size": 8
+    },
+    "test": {
+      "name": "test_dataset",
+      "dataset_type": "RebotTestDatasetREDS",
+      "dataroot_gt": "testsets/REDS4/GT",
+      "dataroot_lq": "testsets/REDS4/sharp_bicubic/X4",
+      "cache_data": true,
+      "io_backend": {
+        "type": "disk"
+      },
+      "num_frame": -1
+    }
+  },
+
+  "netG": {
+    "net_type": "rebotnet",
+    "upscale": 4,
+    "img_size": [192, 320],
+    "depths": [4, 4, 4, 5],
+    "embed_dims": [28, 36, 48, 64],
+    "mlp_dim": 256,
+    "bottle_depth": 4,
+    "dropout": 0.1,
+    "patch_size": 1,
+    "init_type": "default"
+  },
+  "train": {
+    "G_lossfn_type": "charbonnier",
+    "G_lossfn_weight": 1.0,
+    "G_charbonnier_eps": 1e-9,
+
+    "E_decay": 0,
+
+    "G_optimizer_type": "adam",
+    "G_optimizer_lr": 4e-4,
+    "G_optimizer_wd": 0,
+    "G_optimizer_reuse": true,
+    "G_optimizer_betas": [0.9, 0.99],
+
+    "G_param_strict": true,
+    "E_param_strict": true,
+    "G_optimizer_clipgrad": null,
+    
+    "fix_lr_mul": 0.25,
+    "total_iter": 500000,
+
+    "G_scheduler_type": "CosineAnnealingWarmRestarts",
+    "G_scheduler_periods": 500000,
+    "G_scheduler_eta_min": 1e-7,
+    
+    "G_regularizer_orthstep": null,
+    "G_regularizer_clipstep": null,
+    "checkpoint_test": 5000,
+    "checkpoint_save": 5000,
+    "checkpoint_print": 200
+  },
+  "val": {
+    "save_img": false,
+    "num_frame_testing": 0,
+    "num_frame_overlapping": 2,
+    "size_patch_testing": 128
+  }
+}

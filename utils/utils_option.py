@@ -4,6 +4,7 @@ from datetime import datetime
 import json
 import re
 import glob
+from typing import Any
 
 
 '''
@@ -20,8 +21,10 @@ def get_timestamp():
     return datetime.now().strftime('_%y%m%d_%H%M%S')
 
 
-def parse(opt_path, is_train=True):
-
+def parse(
+    opt_path: str,
+    is_train: bool = True,
+) -> OrderedDict:
     # ----------------------------------------
     # remove comments starting with '//'
     # ----------------------------------------
@@ -66,7 +69,7 @@ def parse(opt_path, is_train=True):
     # path
     # ----------------------------------------
     for key, path in opt['path'].items():
-        if path and key in opt['path']:
+        if path:
             opt['path'][key] = os.path.expanduser(path)
 
     path_task = os.path.join(opt['path']['root'], opt['task'])
@@ -83,14 +86,14 @@ def parse(opt_path, is_train=True):
     # ----------------------------------------
     # network
     # ----------------------------------------
-    opt['netG']['scale'] = opt['scale'] if 'scale' in opt else 1
+    opt['netG']['scale'] = opt['scale']
 
     # ----------------------------------------
     # GPU devices
     # ----------------------------------------
     gpu_list = ','.join(str(x) for x in opt['gpu_ids'])
     os.environ['CUDA_VISIBLE_DEVICES'] = gpu_list
-    print('export CUDA_VISIBLE_DEVICES=' + gpu_list)
+    print(f'export CUDA_VISIBLE_DEVICES={gpu_list}')
 
     # ----------------------------------------
     # default setting for distributeddataparallel
@@ -102,7 +105,7 @@ def parse(opt_path, is_train=True):
     if 'dist' not in opt:
         opt['dist'] = False
     opt['num_gpu'] = len(opt['gpu_ids'])
-    print('number of GPUs is: ' + str(opt['num_gpu']))
+    print(f'number of GPUs is: {opt["num_gpu"]}')
 
     # ----------------------------------------
     # default setting for perceptual loss
@@ -165,11 +168,14 @@ def parse(opt_path, is_train=True):
         if 'norm_type' not in opt['netD']:
             opt['netD']['norm_type'] = 'spectral'
 
-
     return opt
 
 
-def find_last_checkpoint(save_dir, net_type='G', pretrained_path=None):
+def find_last_checkpoint(
+    save_dir: str,
+    net_type: str = "G",
+    pretrained_path: str | None = None,
+) -> tuple[int, str | None]:
     """
     Args: 
         save_dir: model folder
@@ -180,9 +186,9 @@ def find_last_checkpoint(save_dir, net_type='G', pretrained_path=None):
         init_iter: iteration number
         init_path: model path
     """
-    file_list = glob.glob(os.path.join(save_dir, '*_{}.pth'.format(net_type)))
+    file_list = glob.glob(os.path.join(save_dir, f'*_{net_type}.pth'))
     if file_list:
-        iter_exist = []
+        iter_exist: list[int] = []
         for file_ in file_list:
             iter_current = re.findall(r"(\d+)_{}.pth".format(net_type), file_)
             iter_exist.append(int(iter_current[0]))
@@ -201,8 +207,8 @@ def find_last_checkpoint(save_dir, net_type='G', pretrained_path=None):
 '''
 
 
-def save(opt):
-    opt_path = opt['opt_path']
+def save(opt: OrderedDict | dict):
+    opt_path = str(opt['opt_path'])
     opt_path_copy = opt['path']['options']
     dirname, filename_ext = os.path.split(opt_path)
     filename, ext = os.path.splitext(filename_ext)
@@ -218,7 +224,10 @@ def save(opt):
 '''
 
 
-def dict2str(opt, indent_l=1):
+def dict2str(
+    opt: dict,
+    indent_l: int = 1,
+) -> str:
     msg = ''
     for k, v in opt.items():
         if isinstance(v, dict):
@@ -238,7 +247,7 @@ def dict2str(opt, indent_l=1):
 '''
 
 
-def dict_to_nonedict(opt):
+def dict_to_nonedict(opt: Any):
     if isinstance(opt, dict):
         new_opt = dict()
         for key, sub_opt in opt.items():

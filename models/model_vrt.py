@@ -1,24 +1,14 @@
-from collections import OrderedDict
 import torch
-import torch.nn as nn
-from torch.optim import lr_scheduler
 from torch.optim import Adam
-
-from models.select_network import define_G
 from models.model_plain import ModelPlain
-from models.loss import CharbonnierLoss
-from models.loss_ssim import SSIMLoss
-
-from utils.utils_model import test_mode
-from utils.utils_regularizers import regularizer_orth, regularizer_clip
-
+from typing import cast
 
 class ModelVRT(ModelPlain):
     """Train video restoration  with pixel loss"""
-    def __init__(self, opt):
+    def __init__(self, opt: dict):
         super(ModelVRT, self).__init__(opt)
-        self.fix_iter = self.opt_train.get('fix_iter', 0)
-        self.fix_keys = self.opt_train.get('fix_keys', [])
+        self.fix_iter = int(self.opt_train.get('fix_iter', 0))
+        self.fix_keys = cast(list[str], self.opt_train.get('fix_keys', []))
         self.fix_unflagged = True
 
     # ----------------------------------------

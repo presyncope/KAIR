@@ -6,6 +6,7 @@ import random
 from os import path as osp
 from torch.nn import functional as F
 from abc import ABCMeta, abstractmethod
+from typing import cast
 
 
 def scandir(dir_path, suffix=None, recursive=False, full_path=False):
@@ -471,7 +472,11 @@ class FileClient(object):
         return self.client.get_text(filepath)
 
 
-def imfrombytes(content, flag='color', float32=False):
+def imfrombytes(
+    content,
+    flag: str = "color",
+    float32: bool = False,
+) -> np.ndarray:
     """Read an image from bytes.
 
     Args:
@@ -486,8 +491,7 @@ def imfrombytes(content, flag='color', float32=False):
     """
     img_np = np.frombuffer(content, np.uint8)
     imread_flags = {'color': cv2.IMREAD_COLOR, 'grayscale': cv2.IMREAD_GRAYSCALE, 'unchanged': cv2.IMREAD_UNCHANGED}
-    img = cv2.imdecode(img_np, imread_flags[flag])
+    img = cast(np.ndarray, cv2.imdecode(img_np, imread_flags[flag]))
     if float32:
         img = img.astype(np.float32) / 255.
     return img
-

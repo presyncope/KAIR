@@ -6,7 +6,7 @@
 """
 
 
-def define_Model(opt):
+def define_Model(opt: dict):
     model = opt['model']      # one input: L
 
     if model == 'plain':
@@ -23,6 +23,9 @@ def define_Model(opt):
 
     elif model == 'vrt':     # one video input L, for VRT
         from models.model_vrt import ModelVRT as M
+    
+    elif model == 'rebotnet':  # one video input L, for ReBotNet
+        from models.model_rebotnet import ModelRebotNet as M
 
     else:
         raise NotImplementedError('Model [{:s}] is not defined.'.format(model))

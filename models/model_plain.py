@@ -11,18 +11,19 @@ from models.loss_ssim import SSIMLoss
 
 from utils.utils_model import test_mode
 from utils.utils_regularizers import regularizer_orth, regularizer_clip
-
+from typing import cast, Any
 
 class ModelPlain(ModelBase):
     """Train with pixel loss"""
-    def __init__(self, opt):
-        super(ModelPlain, self).__init__(opt)
+    def __init__(self, opt: dict):
+        super().__init__(opt)
         # ------------------------------------
         # define network
         # ------------------------------------
-        self.opt_train = self.opt['train']    # training option
+        self.opt_train = cast(dict[str, Any], self.opt['train'])    # training option
         self.netG = define_G(opt)
         self.netG = self.model_to_device(self.netG)
+
         if self.opt_train['E_decay'] > 0:
             self.netE = define_G(opt).to(self.device).eval()
 
@@ -51,12 +52,12 @@ class ModelPlain(ModelBase):
     def load(self):
         load_path_G = self.opt['path']['pretrained_netG']
         if load_path_G is not None:
-            print('Loading model for G [{:s}] ...'.format(load_path_G))
+            print(f'Loading model for G [{load_path_G}] ...')
             self.load_network(load_path_G, self.netG, strict=self.opt_train['G_param_strict'], param_key='params')
         load_path_E = self.opt['path']['pretrained_netE']
         if self.opt_train['E_decay'] > 0:
             if load_path_E is not None:
-                print('Loading model for E [{:s}] ...'.format(load_path_E))
+                print(f'Loading model for E [{load_path_E}] ...')
                 self.load_network(load_path_E, self.netE, strict=self.opt_train['E_param_strict'], param_key='params_ema')
             else:
                 print('Copying model for E ...')
@@ -69,7 +70,7 @@ class ModelPlain(ModelBase):
     def load_optimizers(self):
         load_path_optimizerG = self.opt['path']['pretrained_optimizerG']
         if load_path_optimizerG is not None and self.opt_train['G_optimizer_reuse']:
-            print('Loading optimizerG [{:s}] ...'.format(load_path_optimizerG))
+            print(f'Loading optimizerG [{load_path_optimizerG}] ...')
             self.load_optimizer(load_path_optimizerG, self.G_optimizer)
 
     # ----------------------------------------
@@ -110,11 +111,14 @@ class ModelPlain(ModelBase):
             if v.requires_grad:
                 G_optim_params.append(v)
             else:
-                print('Params [{:s}] will not optimize.'.format(k))
-        if self.opt_train['G_optimizer_type'] == 'adam':
-            self.G_optimizer = Adam(G_optim_params, lr=self.opt_train['G_optimizer_lr'],
-                                    betas=self.opt_train['G_optimizer_betas'],
-                                    weight_decay=self.opt_train['G_optimizer_wd'])
+                print(f'Params [{k}] will not optimize.')
+        if self.opt_train["G_optimizer_type"] == "adam":
+            self.G_optimizer = Adam(
+                G_optim_params,
+                lr=self.opt_train["G_optimizer_lr"],
+                betas=self.opt_train["G_optimizer_betas"],
+                weight_decay=self.opt_train["G_optimizer_wd"],
+            )
         else:
             raise NotImplementedError
 
@@ -128,11 +132,14 @@ class ModelPlain(ModelBase):
                                                             self.opt_train['G_scheduler_gamma']
                                                             ))
         elif self.opt_train['G_scheduler_type'] == 'CosineAnnealingWarmRestarts':
-            self.schedulers.append(lr_scheduler.CosineAnnealingWarmRestarts(self.G_optimizer,
-                                                            self.opt_train['G_scheduler_periods'],
-                                                            self.opt_train['G_scheduler_restart_weights'],
-                                                            self.opt_train['G_scheduler_eta_min']
-                                                            ))
+            self.schedulers.append(
+                lr_scheduler.CosineAnnealingWarmRestarts(
+                    optimizer=self.G_optimizer,
+                    T_0=self.opt_train["G_scheduler_periods"],
+                    T_mult=self.opt_train["G_scheduler_restart_weights"],
+                    eta_min=self.opt_train["G_scheduler_eta_min"],
+                )
+            )
         else:
             raise NotImplementedError
 
@@ -160,31 +167,29 @@ class ModelPlain(ModelBase):
     # ----------------------------------------
     # update parameters and get loss
     # ----------------------------------------
-    def optimize_parameters(self, current_step):
-        self.G_optimizer.zero_grad()
+    def optimize_parameters(self, current_step: int): #type: ignore[override]
+        self.G_optimizer.zero_grad(set_to_none=True)
+
         self.netG_forward()
         G_loss = self.G_lossfn_weight * self.G_lossfn(self.E, self.H)
         G_loss.backward()
 
-        # ------------------------------------
-        # clip_grad
-        # ------------------------------------
-        # `clip_grad_norm` helps prevent the exploding gradient problem.
-        G_optimizer_clipgrad = self.opt_train['G_optimizer_clipgrad'] if self.opt_train['G_optimizer_clipgrad'] else 0
-        if G_optimizer_clipgrad > 0:
-            torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=self.opt_train['G_optimizer_clipgrad'], norm_type=2)
+        # clip grad: `clip_grad_norm` helps prevent the exploding gradient problem.
+        clip_val = self.opt_train.get("G_optimizer_clipgrad", 0) or 0
+        if clip_val > 0:
+            torch.nn.utils.clip_grad_norm_(self.netG.parameters(), max_norm=clip_val, norm_type=2)
 
         self.G_optimizer.step()
 
-        # ------------------------------------
         # regularizer
-        # ------------------------------------
-        G_regularizer_orthstep = self.opt_train['G_regularizer_orthstep'] if self.opt_train['G_regularizer_orthstep'] else 0
-        if G_regularizer_orthstep > 0 and current_step % G_regularizer_orthstep == 0 and current_step % self.opt['train']['checkpoint_save'] != 0:
-            self.netG.apply(regularizer_orth)
-        G_regularizer_clipstep = self.opt_train['G_regularizer_clipstep'] if self.opt_train['G_regularizer_clipstep'] else 0
-        if G_regularizer_clipstep > 0 and current_step % G_regularizer_clipstep == 0 and current_step % self.opt['train']['checkpoint_save'] != 0:
-            self.netG.apply(regularizer_clip)
+        orth_step = self.opt_train.get('G_regularizer_orthstep', 0) or 0
+        clip_step = self.opt_train.get('G_regularizer_clipstep', 0) or 0
+        if orth_step > 0 and current_step % orth_step == 0 and current_step % self.opt['train']['checkpoint_save'] != 0:
+            with torch.no_grad():
+                self.netG.apply(regularizer_orth)
+        if clip_step > 0 and current_step % clip_step == 0 and current_step % self.opt['train']['checkpoint_save'] != 0:
+            with torch.no_grad():
+                self.netG.apply(regularizer_clip)
 
         # self.log_dict['G_loss'] = G_loss.item()/self.E.size()[0]  # if `reduction='sum'`
         self.log_dict['G_loss'] = G_loss.item()

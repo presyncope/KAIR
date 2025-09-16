@@ -5,20 +5,19 @@
 
 
 import os
-import warnings
 import math
 import torch
 import torch.nn as nn
-import torchvision
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
-from distutils.version import LooseVersion
 import numpy as np
-from functools import reduce, lru_cache
-from operator import mul
+from functools import lru_cache
 from einops import rearrange
 from einops.layers.torch import Rearrange
 from .op.deform_attn import deform_attn, DeformAttnPack
+
+from typing import Sequence, cast, override
+import itertools
 
 
 def flow_warp(x, flow, interp_mode='bilinear', padding_mode='zeros', align_corners=True):
@@ -42,7 +41,7 @@ def flow_warp(x, flow, interp_mode='bilinear', padding_mode='zeros', align_corne
     # create mesh grid
     grid_y, grid_x = torch.meshgrid(torch.arange(0, h, dtype=x.dtype, device=x.device),
                                     torch.arange(0, w, dtype=x.dtype, device=x.device))
-    grid = torch.stack((grid_x, grid_y), 2).float()  # W(x), H(y), 2
+    grid = torch.stack((grid_x, grid_y), 2)
     grid.requires_grad = False
 
     vgrid = grid + flow
@@ -57,7 +56,11 @@ def flow_warp(x, flow, interp_mode='bilinear', padding_mode='zeros', align_corne
     return output
 
 
-def make_layer(block, num_blocks, **kwarg):
+def make_layer(
+    block: type[nn.Module],
+    num_blocks: int,
+    **kwarg,
+) -> nn.Sequential:
     """Make layers by stacking the same blocks.
 
     Args:
@@ -99,7 +102,11 @@ class SpyNet(nn.Module):
         return_levels (list[int]): return flows of different levels. Default: [5].
     """
 
-    def __init__(self, load_path=None, return_levels=[5]):
+    def __init__(
+        self,
+        load_path: str | None = None,
+        return_levels: Sequence[int] = [5],
+    ):
         super(SpyNet, self).__init__()
         self.return_levels = return_levels
         self.basic_module = nn.ModuleList([BasicModule() for _ in range(6)])
@@ -193,9 +200,11 @@ class GuidedDeformAttnPack(DeformAttnPack):
     """
 
     def __init__(self, *args, **kwargs):
-        self.max_residue_magnitude = kwargs.pop('max_residue_magnitude', 10)
+        self.max_residue_magnitude: int = kwargs.pop('max_residue_magnitude', 10)
 
         super(GuidedDeformAttnPack, self).__init__(*args, **kwargs)
+        if self.clip_size != 2:
+            raise ValueError("clip_size 는 2가 아니면 동작하지 않는것으로 보임")
 
         self.conv_offset = nn.Sequential(
             nn.Conv3d(self.in_channels * (1 + self.clip_size) + self.clip_size * 2, 64, kernel_size=(1, 1, 1),
@@ -237,9 +246,26 @@ class GuidedDeformAttnPack(DeformAttnPack):
             self.conv_offset[-1].weight.data.zero_()
             self.conv_offset[-1].bias.data.zero_()
 
-    def forward(self, q, k, v, v_prop_warped, flows, return_updateflow):
-        offset1, offset2 = torch.chunk(self.max_residue_magnitude * torch.tanh(
-            self.conv_offset(torch.cat([q] + v_prop_warped + flows, 2).transpose(1, 2)).transpose(1, 2)), 2, dim=2)
+    @override
+    def forward( # type: ignore
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        v_prop_warped: list[torch.Tensor],
+        flows: list[torch.Tensor],
+        return_updateflow,
+    ):  
+        offset1, offset2 = torch.chunk(
+            self.max_residue_magnitude
+            * torch.tanh(
+                self.conv_offset(
+                    torch.cat([q] + v_prop_warped + flows, 2).transpose(1, 2)
+                ).transpose(1, 2)
+            ),
+            2,
+            dim=2,
+        ) # offset1/2 shape:(b, t, deformable_groups * attn_size * 2, h, w)
         offset1 = offset1 + flows[0].flip(2).repeat(1, 1, offset1.size(2) // 2, 1, 1)
         offset2 = offset2 + flows[1].flip(2).repeat(1, 1, offset2.size(2) // 2, 1, 1)
         offset = torch.cat([offset1, offset2], dim=2).flatten(0, 1)
@@ -260,7 +286,10 @@ class GuidedDeformAttnPack(DeformAttnPack):
             return v
 
 
-def window_partition(x, window_size):
+def window_partition(
+    x: torch.Tensor, 
+    window_size: Sequence[int],
+) -> torch.Tensor:
     """ Partition the input into windows. Attention will be conducted within the windows.
 
     Args:
@@ -270,16 +299,36 @@ def window_partition(x, window_size):
     Returns:
         windows: (B*num_windows, window_size*window_size, C)
     """
+    assert len(window_size) == 3
     B, D, H, W, C = x.shape
-    x = x.view(B, D // window_size[0], window_size[0], H // window_size[1], window_size[1], W // window_size[2],
-               window_size[2], C)
-    windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, reduce(mul, window_size), C)
+    wD, wH, wW = window_size
+
+    assert (
+        D % wD == 0 and H % wH == 0 and W % wW == 0
+    ), f"Input (D={D},H={H},W={W}) must be divisible by window_size {window_size}"
+
+    nD, nH, nW = D // wD, H // wH, W // wW
+
+    x = x.view(B, nD, wD, nH, wH, nW, wW, C)
+
+    windows = (
+        x.permute(0, 1, 3, 5, 2, 4, 6, 7)       # -> (B, nD, nH, nW, wD, wH, wW, C)
+        .contiguous()
+        .view(-1, wD * wH * wW, C) 
+    )
 
     return windows
 
 
-def window_reverse(windows, window_size, B, D, H, W):
-    """ Reverse windows back to the original input. Attention was conducted within the windows.
+def window_reverse(
+    windows: torch.Tensor,
+    window_size: Sequence[int],
+    B: int,
+    D: int,
+    H: int,
+    W: int,
+) -> torch.Tensor:
+    """Reverse windows back to the original input. Attention was conducted within the windows.
 
     Args:
         windows: (B*num_windows, window_size, window_size, C)
@@ -290,61 +339,84 @@ def window_reverse(windows, window_size, B, D, H, W):
     Returns:
         x: (B, D, H, W, C)
     """
-    x = windows.view(B, D // window_size[0], H // window_size[1], W // window_size[2], window_size[0], window_size[1],
-                     window_size[2], -1)
+    wD, wH, wW = window_size
+    x = windows.view(B, D // wD, H // wH, W // wW, wD, wH, wW, -1)
     x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, D, H, W, -1)
 
     return x
 
 
-def get_window_size(x_size, window_size, shift_size=None):
-    """ Get the window size and the shift size """
+def get_window_size(
+    x_size: Sequence[int],
+    window_size: Sequence[int],
+    shift_size: Sequence[int],
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Get the window size and the shift size"""
+    assert len(x_size) == 3 and len(window_size) == 3 and len(shift_size) == 3
 
     use_window_size = list(window_size)
-    if shift_size is not None:
-        use_shift_size = list(shift_size)
+    use_shift_size = list(shift_size)
     for i in range(len(x_size)):
         if x_size[i] <= window_size[i]:
             use_window_size[i] = x_size[i]
-            if shift_size is not None:
-                use_shift_size[i] = 0
+            use_shift_size[i] = 0
 
-    if shift_size is None:
-        return tuple(use_window_size)
-    else:
-        return tuple(use_window_size), tuple(use_shift_size)
+    return tuple(use_window_size), tuple(use_shift_size)
 
 
 @lru_cache()
-def compute_mask(D, H, W, window_size, shift_size, device):
+def compute_mask(
+    D: int,
+    H: int,
+    W: int,
+    window_size: Sequence[int],
+    shift_size: Sequence[int],
+    device: torch.device,
+) -> torch.Tensor:
     """ Compute attnetion mask for input of size (D, H, W). @lru_cache caches each stage results. """
+    assert len(window_size) == 3 and len(shift_size) == 3
+    wD, wH, wW = window_size
+    sD, sH, sW = shift_size
 
-    img_mask = torch.zeros((1, D, H, W, 1), device=device)  # 1 Dp Hp Wp 1
-    cnt = 0
-    for d in slice(-window_size[0]), slice(-window_size[0], -shift_size[0]), slice(-shift_size[0], None):
-        for h in slice(-window_size[1]), slice(-window_size[1], -shift_size[1]), slice(-shift_size[1], None):
-            for w in slice(-window_size[2]), slice(-window_size[2], -shift_size[2]), slice(-shift_size[2], None):
-                img_mask[:, d, h, w, :] = cnt
-                cnt += 1
+    img_mask = torch.zeros((1, D, H, W, 1), device=device)  # shape: (B=1, D, H, W, C=1)
+    d_slices = (slice(-wD), slice(-wD, -sD), slice(-sD, None))
+    h_slices = (slice(-wH), slice(-wH, -sH), slice(-sH, None))
+    w_slices = (slice(-wW), slice(-wW, -sW), slice(-sW, None))
+
+    for cnt, (d, h, w) in enumerate(itertools.product(d_slices, h_slices, w_slices)):
+        img_mask[:, d, h, w, :] = cnt
+
     mask_windows = window_partition(img_mask, window_size)  # nW, ws[0]*ws[1]*ws[2], 1
     mask_windows = mask_windows.squeeze(-1)  # nW, ws[0]*ws[1]*ws[2]
     attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
     attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
 
-    return attn_mask
+    return attn_mask # shape: (nW, N, N), N = wD * wH * wW
 
 
 class Mlp(nn.Module):
-    """ Multilayer perceptron.
+    """Multilayer perceptron. (channel mixing)
 
     Args:
         x: (B, D, H, W, C)
 
     Returns:
         x: (B, D, H, W, C)
+
+    Mlp complexity:
+        #params = inC * outC + outC (bias)
+        MACs = B * D * H * W * (inC * outC)
+
     """
 
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+    def __init__(
+        self,
+        in_features: int,
+        hidden_features: int | None = None,
+        out_features: int | None = None,
+        act_layer: type[nn.Module] = nn.GELU,
+        # drop: float = 0.0,
+    ):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -353,7 +425,7 @@ class Mlp(nn.Module):
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.fc2(self.act(self.fc1(x)))
 
 
@@ -368,21 +440,41 @@ class WindowAttention(nn.Module):
         qk_scale (float | None, optional): Override default qk scale of head_dim ** -0.5 if set
     """
 
-    def __init__(self, dim, window_size, num_heads, qkv_bias=False, qk_scale=None):
+    def __init__(
+        self,
+        dim: int,
+        window_size: Sequence[int],
+        num_heads: int,
+        qkv_bias: bool = False,
+        qk_scale: float | None = None,
+    ):
         super().__init__()
+        if dim % num_heads != 0:
+            raise RuntimeError("Input channel dimension should be divisible by the number of heads.")
+
         self.window_size = window_size
         self.num_heads = num_heads
         head_dim = dim // num_heads
-        self.scale = qk_scale or head_dim ** -0.5
+        self.scale = qk_scale or float(head_dim ** -0.5)
+
+        wD, wH, wW = window_size
 
         self.relative_position_bias_table = nn.Parameter(
-            torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1) * (2 * window_size[2] - 1),
-                        num_heads))  # 2*Wd-1 * 2*Wh-1 * 2*Ww-1, nH
+            torch.zeros((2 * wD - 1) * (2 * wH - 1) * (2 * wW - 1), num_heads)
+        )
+        '''
+            register_buffer 사용하는 이유:
+                학습할 필요 없는, 하지만 GPU 이동과 모델 저장/로드에 포함되어야 하는 텐서를 추가할 때 사용함.
+        '''
         self.register_buffer("relative_position_index", self.get_position_index(window_size))
         self.qkv_self = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.proj = nn.Linear(dim, dim)
 
-    def forward(self, x, mask=None):
+    def forward(
+        self,
+        x: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """ Forward function.
 
         Args:
@@ -401,12 +493,20 @@ class WindowAttention(nn.Module):
 
         return x
 
-    def attention(self, q, k, v, mask, x_shape):
+    def attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        mask: torch.Tensor | None,
+        x_shape: tuple[int, int, int],
+    ) -> torch.Tensor:
         B_, N, C = x_shape
-        attn = (q * self.scale) @ k.transpose(-2, -1)
+        attn = (q * self.scale) @ k.transpose(-2, -1) # shape: (B_, nH, N, N)
 
+        relative_position_index = cast(torch.Tensor, self.relative_position_index)
         relative_position_bias = self.relative_position_bias_table[
-            self.relative_position_index[:N, :N].reshape(-1)].reshape(N, N, -1)  # Wd*Wh*Ww, Wd*Wh*Ww,nH
+            relative_position_index[:N, :N].reshape(-1)].reshape(N, N, -1)  # shape: (N, N, 1)
         attn = attn + relative_position_bias.permute(2, 0, 1).unsqueeze(0)  # B_, nH, N, N
 
         if mask is not None:
@@ -419,23 +519,30 @@ class WindowAttention(nn.Module):
 
         return x
 
-    def get_position_index(self, window_size):
-        ''' Get pair-wise relative position index for each token inside the window. '''
+    def get_position_index(
+        self,
+        window_size: Sequence[int],
+    ) -> torch.Tensor:
+        """
+            Get pair-wise relative position index for each token inside the window.
+            3D 좌표를 linear offset으로 변환하는 table 계산
+        """
+        wD, wH, wW = window_size
 
-        coords_d = torch.arange(window_size[0])
-        coords_h = torch.arange(window_size[1])
-        coords_w = torch.arange(window_size[2])
-        coords = torch.stack(torch.meshgrid(coords_d, coords_h, coords_w))  # 3, Wd, Wh, Ww
+        coords_d = torch.arange(wD)
+        coords_h = torch.arange(wH)
+        coords_w = torch.arange(wW)
+        coords = torch.stack(torch.meshgrid(coords_d, coords_h, coords_w))  # shape (3, N), N=wD * wH * wW
         coords_flatten = torch.flatten(coords, 1)  # 3, Wd*Wh*Ww
-        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 3, Wd*Wh*Ww, Wd*Wh*Ww
-        relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wd*Wh*Ww, Wd*Wh*Ww, 3
-        relative_coords[:, :, 0] += window_size[0] - 1  # shift to start from 0
-        relative_coords[:, :, 1] += window_size[1] - 1
-        relative_coords[:, :, 2] += window_size[2] - 1
+        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # shape (3, N, N)
+        relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # shape (N, N, 3)
+        relative_coords[:, :, 0] += wD - 1  # shift to start from 0
+        relative_coords[:, :, 1] += wH - 1
+        relative_coords[:, :, 2] += wW - 1
 
-        relative_coords[:, :, 0] *= (2 * window_size[1] - 1) * (2 * window_size[2] - 1)
-        relative_coords[:, :, 1] *= (2 * window_size[2] - 1)
-        relative_position_index = relative_coords.sum(-1)  # Wd*Wh*Ww, Wd*Wh*Ww
+        relative_coords[:, :, 0] *= (2 * wH - 1) * (2 * wW - 1)
+        relative_coords[:, :, 1] *= (2 * wW - 1)
+        relative_position_index = relative_coords.sum(-1)  # shape (N, N)
 
         return relative_position_index
 
@@ -458,20 +565,21 @@ class STL(nn.Module):
         use_checkpoint_ffn (bool): If True, use torch.checkpoint for feed-forward modules. Default: False.
     """
 
-    def __init__(self,
-                 dim,
-                 input_resolution,
-                 num_heads,
-                 window_size=(2, 8, 8),
-                 shift_size=(0, 0, 0),
-                 mlp_ratio=2.,
-                 qkv_bias=True,
-                 qk_scale=None,
-                 act_layer=nn.GELU,
-                 norm_layer=nn.LayerNorm,
-                 use_checkpoint_attn=False,
-                 use_checkpoint_ffn=False
-                 ):
+    def __init__(
+        self,
+        dim: int,
+        input_resolution: Sequence[int],
+        num_heads: int,
+        window_size: Sequence[int] = (2, 8, 8),
+        shift_size: Sequence[int] = (0, 0, 0),
+        mlp_ratio: float = 2.0,
+        qkv_bias: bool = True,
+        qk_scale: float | None = None,
+        act_layer: type[nn.Module] = nn.GELU,
+        norm_layer: type[nn.Module] = nn.LayerNorm,
+        use_checkpoint_attn: bool = False,
+        use_checkpoint_ffn: bool = False,
+    ):
         super().__init__()
         self.input_resolution = input_resolution
         self.num_heads = num_heads
@@ -490,7 +598,7 @@ class STL(nn.Module):
         self.norm2 = norm_layer(dim)
         self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer)
 
-    def forward_part1(self, x, mask_matrix):
+    def forward_part1(self, x: torch.Tensor, mask_matrix: torch.Tensor) -> torch.Tensor:
         B, D, H, W, C = x.shape
         window_size, shift_size = get_window_size((D, H, W), self.window_size, self.shift_size)
 
@@ -533,10 +641,10 @@ class STL(nn.Module):
 
         return x
 
-    def forward_part2(self, x):
+    def forward_part2(self, x: torch.Tensor) -> torch.Tensor:
         return self.mlp(self.norm2(x))
 
-    def forward(self, x, mask_matrix):
+    def forward(self, x: torch.Tensor, mask_matrix: torch.Tensor) -> torch.Tensor:
         """ Forward function.
 
         Args:
@@ -546,13 +654,13 @@ class STL(nn.Module):
 
         # attention
         if self.use_checkpoint_attn:
-            x = x + checkpoint.checkpoint(self.forward_part1, x, mask_matrix)
+            x = x + cast(torch.Tensor, checkpoint.checkpoint(self.forward_part1, x, mask_matrix))
         else:
             x = x + self.forward_part1(x, mask_matrix)
 
         # feed-forward
         if self.use_checkpoint_ffn:
-            x = x + checkpoint.checkpoint(self.forward_part2, x)
+            x = x + cast(torch.Tensor, checkpoint.checkpoint(self.forward_part2, x))
         else:
             x = x + self.forward_part2(x)
 
@@ -577,20 +685,21 @@ class STG(nn.Module):
         use_checkpoint_ffn (bool): If True, use torch.checkpoint for feed-forward modules. Default: False.
     """
 
-    def __init__(self,
-                 dim,
-                 input_resolution,
-                 depth,
-                 num_heads,
-                 window_size=[2, 8, 8],
-                 shift_size=None,
-                 mlp_ratio=2.,
-                 qkv_bias=False,
-                 qk_scale=None,
-                 norm_layer=nn.LayerNorm,
-                 use_checkpoint_attn=False,
-                 use_checkpoint_ffn=False,
-                 ):
+    def __init__(
+        self,
+        dim: int,
+        input_resolution: Sequence[int],
+        depth: int,
+        num_heads: int,
+        window_size: Sequence[int] = [2, 8, 8],
+        shift_size: Sequence[int] | None = None,
+        mlp_ratio: float = 2.0,
+        qkv_bias: bool = False,
+        qk_scale: float | None = None,
+        norm_layer: type[nn.Module] = nn.LayerNorm,
+        use_checkpoint_attn: bool = False,
+        use_checkpoint_ffn: bool = False,
+    ):
         super().__init__()
         self.input_resolution = input_resolution
         self.window_size = window_size
@@ -613,7 +722,7 @@ class STG(nn.Module):
             )
             for i in range(depth)])
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """ Forward function.
 
         Args:
@@ -638,7 +747,7 @@ class STG(nn.Module):
 
 
 class RSTB(nn.Module):
-    """ Residual Swin Transformer Block (RSTB).
+    """Residual Swin Transformer Block (RSTB).
 
     Args:
         kwargs: Args for RSTB.
@@ -646,12 +755,13 @@ class RSTB(nn.Module):
 
     def __init__(self, **kwargs):
         super(RSTB, self).__init__()
-        self.input_resolution = kwargs['input_resolution']
+        # self.input_resolution = kwargs['input_resolution']
 
         self.residual_group = STG(**kwargs)
-        self.linear = nn.Linear(kwargs['dim'], kwargs['dim'])
+        dim: int = kwargs["dim"]
+        self.linear = nn.Linear(dim, dim)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.linear(self.residual_group(x).transpose(1, 4)).transpose(1, 4)
 
 
@@ -667,7 +777,15 @@ class RSTBWithInputConv(nn.Module):
          **kwarg: Args for RSTB.
     """
 
-    def __init__(self, in_channels=3, kernel_size=(1, 3, 3), stride=1, groups=1, num_blocks=2, **kwargs):
+    def __init__(
+        self,
+        in_channels: int = 3,
+        kernel_size: tuple[int, int, int] = (1, 3, 3),
+        stride: int = 1,
+        groups: int = 1,
+        num_blocks: int = 2,
+        **kwargs,
+    ):
         super().__init__()
 
         main = []
@@ -693,7 +811,7 @@ class RSTBWithInputConv(nn.Module):
 
         self.main = nn.Sequential(*main)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward function for RSTBWithInputConv.
 
@@ -715,8 +833,6 @@ class Upsample(nn.Sequential):
     """
 
     def __init__(self, scale, num_feat):
-        assert LooseVersion(torch.__version__) >= LooseVersion('1.8.1'), \
-            'PyTorch version >= 1.8.1 to support 5D PixelShuffle.'
 
         m = []
         if (scale & (scale - 1)) == 0:  # scale = 2^n
@@ -770,32 +886,33 @@ class RVRT(nn.Module):
             cpu_cache_length: (int): Maximum video length without cpu caching. Default: 100.
         """
 
-    def __init__(self,
-                 upscale=4,
-                 clip_size=2,
-                 img_size=[2, 64, 64],
-                 window_size=[2, 8, 8],
-                 num_blocks=[1, 2, 1],
-                 depths=[2, 2, 2],
-                 embed_dims=[144, 144, 144],
-                 num_heads=[6, 6, 6],
-                 mlp_ratio=2.,
-                 qkv_bias=True,
-                 qk_scale=None,
-                 norm_layer=nn.LayerNorm,
-                 inputconv_groups=[1, 1, 1, 1, 1, 1],
-                 spynet_path=None,
-                 max_residue_magnitude=10,
-                 deformable_groups=12,
-                 attention_heads=12,
-                 attention_window=[3, 3],
-                 nonblind_denoising=False,
-                 use_checkpoint_attn=False,
-                 use_checkpoint_ffn=False,
-                 no_checkpoint_attn_blocks=[],
-                 no_checkpoint_ffn_blocks=[],
-                 cpu_cache_length=100
-                 ):
+    def __init__(
+        self,
+        upscale: int = 4,
+        clip_size: int = 2,
+        img_size=[2, 64, 64],
+        window_size=[2, 8, 8],
+        num_blocks=[1, 2, 1],
+        depths=[2, 2, 2],
+        embed_dims=[144, 144, 144],
+        num_heads=[6, 6, 6],
+        mlp_ratio: float = 2.0,
+        qkv_bias: bool = True,
+        qk_scale: float | None = None,
+        norm_layer: type[nn.Module] = nn.LayerNorm,
+        inputconv_groups=[1, 1, 1, 1, 1, 1],
+        spynet_path: str | None = None,
+        max_residue_magnitude=10,
+        deformable_groups=12,
+        attention_heads=12,
+        attention_window=[3, 3],
+        nonblind_denoising=False,
+        use_checkpoint_attn=False,
+        use_checkpoint_ffn=False,
+        no_checkpoint_attn_blocks=[],
+        no_checkpoint_ffn_blocks=[],
+        cpu_cache_length=100,
+    ):
 
         super().__init__()
         self.upscale = upscale
@@ -914,7 +1031,10 @@ class RVRT(nn.Module):
         self.upsampler = Upsample(4, 64)
         self.conv_last = nn.Conv3d(64, 3, kernel_size=(1, 3, 3), padding=(0, 1, 1))
 
-    def compute_flow(self, lqs):
+    def compute_flow(
+        self,
+        lqs: torch.Tensor,
+    ) -> tuple[torch.Tensor | None, torch.Tensor]:
         """Compute optical flow using SPyNet for feature alignment.
 
         Note that if the input is an mirror-extended sequence, 'flows_forward'
@@ -960,7 +1080,13 @@ class RVRT(nn.Module):
             if torch.norm(lqs_1 - lqs_2.flip(1)) == 0:
                 self.is_mirror_extended = True
 
-    def propagate(self, feats, flows, module_name, updated_flows=None):
+    def propagate(
+        self,
+        feats: dict[str, list[torch.Tensor]],
+        flows: torch.Tensor,
+        module_name: str,
+        updated_flows: dict[str, list[torch.Tensor]],
+    ):
         """Propagate the latent clip features throughout the sequence.
 
         Args:
@@ -978,7 +1104,7 @@ class RVRT(nn.Module):
                 propagation branch, which is represented by a list of tensors.
         """
 
-        n, t, _, h, w = flows.size()
+        n, t, _, h, w = flows.shape
         if 'backward' in module_name:
             flow_idx = range(0, t + 1)[::-1]
             clip_idx = range(0, (t + 1) // self.clip_size)[::-1]
@@ -1112,7 +1238,7 @@ class RVRT(nn.Module):
 
             return hr
 
-    def forward(self, lqs):
+    def forward(self, lqs: torch.Tensor) -> torch.Tensor:
         """Forward function for RVRT.
 
         Args:
@@ -1149,7 +1275,7 @@ class RVRT(nn.Module):
             lqs = lqs.cpu()
             lqs_downsample = lqs_downsample.cpu()
             flows_backward = flows_backward.cpu()
-            flows_forward = flows_forward.cpu()
+            flows_forward = flows_forward.cpu() # type: ignore
             torch.cuda.empty_cache()
         else:
             feats['shallow'] = list(torch.chunk(self.feat_extract(lqs), t // self.clip_size, dim=1))

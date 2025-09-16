@@ -1,6 +1,8 @@
 import functools
 import torch
+import torch.nn as nn
 from torch.nn import init
+from typing import cast, Any
 
 
 """
@@ -14,9 +16,8 @@ from torch.nn import init
 # Generator, netG, G
 # --------------------------------------------
 def define_G(opt):
-    opt_net = opt['netG']
+    opt_net = cast(dict[str, Any], opt['netG'])
     net_type = opt_net['net_type']
-
 
     # ----------------------------------------
     # denoising task
@@ -247,6 +248,18 @@ def define_G(opt):
                    no_checkpoint_ffn_blocks=opt_net['no_checkpoint_ffn_blocks'],
                    cpu_cache_length=opt_net['cpu_cache_length'])
 
+    elif net_type == 'rebot':
+        from models.network_rebotnet import rebotnet as net
+        netG = net(
+            upscale=opt_net["upscale"],
+            img_size=opt_net["img_size"],
+            depths=opt_net["depths"],
+            embed_dims=opt_net["embed_dims"],
+            mlp_dim=opt_net["mlp_dim"],
+            dropout=opt_net["dropout"],
+            patch_size=opt_net["patch_size"],
+        )
+
     # ----------------------------------------
     # others
     # ----------------------------------------
@@ -360,7 +373,7 @@ def define_F(opt, use_bn=False):
 """
 
 
-def init_weights(net, init_type='xavier_uniform', init_bn_type='uniform', gain=1):
+def init_weights(net: nn.Module, init_type: str = 'xavier_uniform', init_bn_type='uniform', gain=1):
     """
     # Kai Zhang, https://github.com/cszn/KAIR
     #

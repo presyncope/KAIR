@@ -10,7 +10,7 @@
 
 
 def define_Dataset(dataset_opt):
-    dataset_type = dataset_opt['dataset_type'].lower()
+    dataset_type = str(dataset_opt['dataset_type']).lower()
     if dataset_type in ['l', 'low-quality', 'input-only']:
         from data.dataset_l import DatasetL as D
 
