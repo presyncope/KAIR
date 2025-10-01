@@ -76,7 +76,10 @@ def define_Dataset(dataset_opt):
         from data.dataset_video_test import VFI_UCF101 as D
     elif dataset_type in ['vfi_vid4']:
         from data.dataset_video_test import VFI_Vid4 as D
-
+    elif dataset_type in ['rebottraindatasetreds']:
+        from data.dataset_video_train import RebotTrainDatasetREDS as D
+    elif dataset_type in ['rebottestdatasetreds']:
+        from data.dataset_video_test import RebotTestDatasetREDS as D
 
     # -----------------------------------------
     # common

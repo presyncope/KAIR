@@ -224,7 +224,7 @@ class ModelPlain(ModelBase):
     # ----------------------------------------
     # get L, E, H image
     # ----------------------------------------
-    def current_visuals(self, need_H=True):
+    def current_visuals(self, need_H=True): # type: ignore[override]
         out_dict = OrderedDict()
         out_dict['L'] = self.L.detach()[0].float().cpu()
         out_dict['E'] = self.E.detach()[0].float().cpu()

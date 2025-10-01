@@ -6,6 +6,7 @@ import torch
 from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
+import cv2
 
 from utils import utils_logger
 from utils import utils_option as option
@@ -109,7 +110,7 @@ def main():
         raise ValueError("The training data does not exist.")
     if test_loader is None:
         raise ValueError("The test data does not exist.")
-    
+
     # ----------------------------------------
     # Step--3 (initialize model)
     # ----------------------------------------
@@ -159,9 +160,9 @@ def main():
                     model.feed_data(test_data)
                     model.test()
 
-                    visuals = model.current_visuals()
-                    output = visuals['E']
-                    gt = visuals['H'] if 'H' in visuals else None
+                    visuals = model.current_visuals(need_H=True)
+                    output = cast(torch.Tensor, visuals['E'])
+                    gt = cast(torch.Tensor, visuals['H'])
                     folder = test_data['folder']
 
                     test_results_folder = OrderedDict()
@@ -222,7 +223,7 @@ def main():
                         logger.info('Testing {:20s}  ({:2d}/{})'.format(folder[0], idx, len(test_loader)))
 
                 # summarize psnr/ssim
-                if gt is not None:
+                if gt is not None: #type: ignore[unreachable]
                     ave_psnr = sum(test_results['psnr']) / len(test_results['psnr'])
                     ave_ssim = sum(test_results['ssim']) / len(test_results['ssim'])
                     ave_psnr_y = sum(test_results['psnr_y']) / len(test_results['psnr_y'])

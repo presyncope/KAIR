@@ -36,9 +36,9 @@
       "interval_list": [1],
       "random_reverse": false,
       "use_hflip": true,
-      "use_rot": true,
+      "use_rot": false,
       "dataloader_shuffle": true,
-      "dataloader_num_workers": 32,
+      "dataloader_num_workers": 8,
       "dataloader_batch_size": 8
     },
     "test": {
@@ -55,7 +55,7 @@
   },
 
   "netG": {
-    "net_type": "rebotnet",
+    "net_type": "rebot",
     "upscale": 4,
     "img_size": [192, 320],
     "depths": [4, 4, 4, 5],

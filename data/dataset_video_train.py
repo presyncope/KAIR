@@ -577,7 +577,7 @@ class RebotTrainDatasetREDS(data.Dataset):
 
         for neighbor in neighbor_list:
             if self.is_lmdb:
-                img_lq_path = f'{clip_name}/{neighbor:{self.filename_tmpl}}'
+                img_lq_path = f'X4/{clip_name}/{neighbor:{self.filename_tmpl}}'
                 img_gt_path = f'{clip_name}/{neighbor:{self.filename_tmpl}}'
             else:
                 img_lq_path = self.lq_root / clip_name / f'{neighbor:{self.filename_tmpl}}.{self.filename_ext}'
@@ -585,6 +585,8 @@ class RebotTrainDatasetREDS(data.Dataset):
 
             # get LQ
             img_bytes = self.file_client.get(img_lq_path, 'lq')
+            if img_bytes is None:
+                raise ValueError(f'File client get None for lq image: {img_lq_path}')
             img_lq = utils_video.imfrombytes(img_bytes, float32=True)
             img_lq = cv2.copyMakeBorder(
                 img_lq,
@@ -599,6 +601,8 @@ class RebotTrainDatasetREDS(data.Dataset):
 
             # get GT
             img_bytes = self.file_client.get(img_gt_path, 'gt')
+            if img_bytes is None:
+                raise ValueError(f'File client get None for gt image: {img_gt_path}')
             img_gt = utils_video.imfrombytes(img_bytes, float32=True)
             img_gt = cv2.copyMakeBorder(
                 img_gt,
@@ -612,7 +616,7 @@ class RebotTrainDatasetREDS(data.Dataset):
             img_gts.append(img_gt)
         
         # randomly crop
-        img_gts, img_lqs = utils_video.paired_random_crop(img_gts, img_lqs, self.gt_size, self.scale)
+        # img_gts, img_lqs = utils_video.paired_random_crop(img_gts, img_lqs, self.gt_size, self.scale)
 
         # augmentation - flip, rotate
         img_lqs.extend(img_gts)

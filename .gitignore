@@ -3,6 +3,8 @@
 
 ### Custom ###
 experiments/
+run/
+logs/
 
 testsets/*
 !testsets/read_faces/
