@@ -495,6 +495,7 @@ class RebotTrainDatasetREDS(data.Dataset):
         self.filename_tmpl = str(opt.get('filename_tmpl', '08d'))
         self.filename_ext = str(opt.get('filename_ext', 'png'))
         self.num_frame = int(opt['num_frame'])
+        self.use_uint8 = opt.get('use_uint8_tensors', True)
 
         keys: list[str] = []
         total_num_frames: list[int] = []
@@ -574,6 +575,7 @@ class RebotTrainDatasetREDS(data.Dataset):
         # get the neighboring LQ and GT frames
         img_lqs = []
         img_gts = []
+        use_f32 = not self.use_uint8
 
         for neighbor in neighbor_list:
             if self.is_lmdb:
@@ -587,7 +589,7 @@ class RebotTrainDatasetREDS(data.Dataset):
             img_bytes = self.file_client.get(img_lq_path, 'lq')
             if img_bytes is None:
                 raise ValueError(f'File client get None for lq image: {img_lq_path}')
-            img_lq = utils_video.imfrombytes(img_bytes, float32=True)
+            img_lq = utils_video.imfrombytes(img_bytes, float32=use_f32)
             img_lq = cv2.copyMakeBorder(
                 img_lq,
                 top=0,
@@ -603,7 +605,7 @@ class RebotTrainDatasetREDS(data.Dataset):
             img_bytes = self.file_client.get(img_gt_path, 'gt')
             if img_bytes is None:
                 raise ValueError(f'File client get None for gt image: {img_gt_path}')
-            img_gt = utils_video.imfrombytes(img_bytes, float32=True)
+            img_gt = utils_video.imfrombytes(img_bytes, float32=use_f32)
             img_gt = cv2.copyMakeBorder(
                 img_gt,
                 top=0,
@@ -622,7 +624,7 @@ class RebotTrainDatasetREDS(data.Dataset):
         img_lqs.extend(img_gts)
         img_results = utils_video.augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'])
 
-        img_results = cast(list[torch.Tensor], utils_video.img2tensor(img_results))
+        img_results = cast(list[torch.Tensor], utils_video.img2tensor(img_results, float32=use_f32))
         img_gts = torch.stack(img_results[len(img_lqs) // 2:], dim=0)
         img_lqs = torch.stack(img_results[:len(img_lqs) // 2], dim=0)
 

@@ -28,9 +28,8 @@
       "filename_ext": "png",
       "val_partition": "REDS4",
       "test_mode": false,
-      "io_backend": {
-        "type": "lmdb"
-      },
+      "use_uint8_tensors": true,
+      "io_backend": {"type": "lmdb"},
       "num_frame": 20,
       "gt_size": [768, 1280],
       "interval_list": [1],
@@ -38,7 +37,7 @@
       "use_hflip": true,
       "use_rot": false,
       "dataloader_shuffle": true,
-      "dataloader_num_workers": 8,
+      "dataloader_num_workers": 32,
       "dataloader_batch_size": 8
     },
     "test": {
@@ -47,9 +46,8 @@
       "dataroot_gt": "testsets/REDS4/GT",
       "dataroot_lq": "testsets/REDS4/sharp_bicubic/X4",
       "cache_data": true,
-      "io_backend": {
-        "type": "disk"
-      },
+      "use_uint8_tensors": true,
+      "io_backend": {"type": "disk"},
       "num_frame": -1
     }
   },

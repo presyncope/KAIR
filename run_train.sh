@@ -9,7 +9,7 @@ set -euo pipefail
 ### 기본 설정 (요청 반영)
 PY=${PY:-python}                               # 기본 python
 ENTRY=${ENTRY:-main_train_rebotnet.py}         # 엔트리 스크립트
-MEM_LIMIT=${MEM_LIMIT:-48G}                    # RAM 상한
+MEM_LIMIT=${MEM_LIMIT:-52G}                    # RAM 상한
 SWAP_LIMIT=${SWAP_LIMIT:-0}                    # 0이면 스왑 금지
 WORKDIR=${WORKDIR:-"$(pwd)"}                   # 기본 작업 디렉토리
 
@@ -18,6 +18,12 @@ STAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_DIR=${LOG_DIR:-"${WORKDIR}/logs"}
 PID_DIR=${PID_DIR:-"${WORKDIR}/run"}
 UNIT_NAME=${UNIT_NAME:-"train_${STAMP}"}
+
+# echo "[INFO] remounting /dev/shm with size=50G..."
+# sudo mount -o remount,size=50G /dev/shm
+
+# echo "[INFO] current /dev/shm status:"
+# df -h /dev/shm
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 

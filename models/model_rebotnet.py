@@ -11,8 +11,14 @@ class ModelRebotNet(ModelPlain):
 
     @override
     def feed_data(self, data): #type: ignore[override]
-        self.L = cast(torch.Tensor, data['L'].to(self.device))
-        self.H = cast(torch.Tensor, data['H'].to(self.device))
+        L = cast(torch.Tensor, data['L'])
+        H = cast(torch.Tensor, data['H'])
+        if L.dtype == torch.uint8:
+            self.L = L.to(dtype=torch.float32, device=self.device) / 255.0
+            self.H = H.to(dtype=torch.float32, device=self.device) / 255.0
+        else:
+            self.L = L.to(device=self.device)
+            self.H = H.to(device=self.device)
 
     @override
     def optimize_parameters(self, current_step: int): # type: ignore[override]

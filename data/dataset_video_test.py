@@ -465,6 +465,7 @@ class RebotTestDatasetREDS(data.Dataset):
         self.cache_data = bool(opt['cache_data'])
         self.gt_root, self.lq_root = opt['dataroot_gt'], opt['dataroot_lq']
         self.data_info = {'lq_path': [], 'gt_path': [], 'folder': [], 'idx': [], 'border': []}
+        self.use_uint8 = opt.get('use_uint8_tensors', True)
 
         self.imgs_lq, self.imgs_gt = {}, {}
         if 'meta_info_file' in opt:
@@ -500,8 +501,8 @@ class RebotTestDatasetREDS(data.Dataset):
             # cache data or save the frame list
             if self.cache_data:
                 print(f'Cache {subfolder_name} for VideoTestDataset...')
-                self.imgs_lq[subfolder_name] = utils_video.read_img_seq(img_paths_lq)
-                self.imgs_gt[subfolder_name] = utils_video.read_img_seq(img_paths_gt)
+                self.imgs_lq[subfolder_name] = utils_video.read_img_seq_rebot(img_paths_lq, not self.use_uint8, (0, 0, 0, 12))
+                self.imgs_gt[subfolder_name] = utils_video.read_img_seq_rebot(img_paths_gt, not self.use_uint8, (0, 0, 0, 48))
             else:
                 self.imgs_lq[subfolder_name] = img_paths_lq
                 self.imgs_gt[subfolder_name] = img_paths_gt
@@ -516,8 +517,8 @@ class RebotTestDatasetREDS(data.Dataset):
             imgs_lq = self.imgs_lq[folder]
             imgs_gt = self.imgs_gt[folder]
         else:
-            imgs_lq = utils_video.read_img_seq(self.imgs_lq[folder])
-            imgs_gt = utils_video.read_img_seq(self.imgs_gt[folder])
+            imgs_lq = utils_video.read_img_seq_rebot(self.imgs_lq[folder], not self.use_uint8, (0, 0, 0, 12))
+            imgs_gt = utils_video.read_img_seq_rebot(self.imgs_gt[folder], not self.use_uint8, (0, 0, 0, 48))
 
         return {
             'L': imgs_lq,

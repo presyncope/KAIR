@@ -90,7 +90,7 @@ def main():
                 shuffle=dataset_opt["dataloader_shuffle"],
                 num_workers=dataset_opt["dataloader_num_workers"],
                 drop_last=True,
-                pin_memory=True,
+                pin_memory=False,
             )
 
         elif phase == 'test':
@@ -101,7 +101,7 @@ def main():
                 shuffle=False,
                 num_workers=1,
                 drop_last=False,
-                pin_memory=True,
+                pin_memory=False,
             )
         else:
             raise NotImplementedError("Phase [%s] is not recognized." % phase)

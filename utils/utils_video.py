@@ -83,6 +83,35 @@ def read_img_seq(path, require_mod_crop=False, scale=1, return_imgname=False):
         return imgs
 
 
+def read_img_seq_rebot(
+    pathes: list[str],
+    float32: bool = False,
+    padding_ltrb: tuple[int, int, int, int] | None = None,
+) -> torch.Tensor:
+    imgs = [cv2.imread(v) for v in pathes]
+    imgs = cast(list[np.ndarray], imgs)
+    if padding_ltrb:
+        imgs = [
+            cv2.copyMakeBorder(
+                v,
+                top=padding_ltrb[1],
+                bottom=padding_ltrb[3],
+                left=padding_ltrb[0],
+                right=padding_ltrb[2],
+                borderType=cv2.BORDER_CONSTANT,
+                value=(0, 0, 0),
+            )
+            for v in imgs
+        ]
+        imgs = cast(list[np.ndarray], imgs)
+
+    imgs = img2tensor(imgs, bgr2rgb=True, float32=float32)
+    imgs = cast(list[torch.Tensor], imgs)
+    imgs = torch.stack(imgs, dim=0)
+    
+    return imgs
+
+
 def img2tensor(imgs, bgr2rgb=True, float32=True):
     """Numpy array to tensor.
 
